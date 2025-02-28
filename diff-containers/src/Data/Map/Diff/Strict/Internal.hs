@@ -129,19 +129,13 @@ diff :: (Ord k, Eq v) => Map k v -> Map k v -> Diff k v
 diff m1 m2 = Diff $
     MonoidMap.fromMap $
     Merge.merge
-      (Merge.mapMissing $ \_k _v ->
-          NESeq.toSeq $ getDeltaHistory singletonDelete
-      )
-      (Merge.mapMissing $ \_k v ->
-          NESeq.toSeq $ getDeltaHistory $ singletonInsert v
-      )
+      (Merge.mapMissing $ \_k _v -> Seq.singleton Delete)
+      (Merge.mapMissing $ \_k v -> Seq.singleton (Insert v))
       (Merge.zipWithMaybeMatched $ \ _k v1 v2 ->
         if v1 == v2 then
           Nothing
         else
-          Just . NESeq.toSeq $
-            getDeltaHistory singletonDelete <>
-            getDeltaHistory (singletonInsert v2)
+          Just $ Seq.singleton Delete <> Seq.singleton (Insert v2)
       )
       m1
       m2
