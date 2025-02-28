@@ -13,6 +13,7 @@ import           Data.Map.Diff.Strict.Internal (Delta (..), DeltaHistory (..),
                      Diff (..))
 import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import           Data.MonoidMap.QuickCheck.Instances.Arbitrary ()
 import           Data.Maybe
 import           Data.Sequence.NonEmpty (NESeq (..))
 import qualified Data.Sequence.NonEmpty as NESeq
