@@ -83,6 +83,14 @@ import           Prelude hiding (last, length, null, splitAt)
 newtype Diff k v = Diff (MonoidMap k (Seq (Delta v)))
   deriving stock (Generic, Show, Eq)
   deriving anyclass (NoThunks)
+  deriving newtype
+    ( Semigroup
+    , Monoid
+    , LeftCancellative
+    , LeftReductive
+    , RightCancellative
+    , RightReductive
+    )
 
 -- | Custom 'Functor' instance, since @'Functor' ('Map' k)@ is actually the
 -- 'Functor' instance for a lazy Map.
@@ -96,7 +104,7 @@ instance Functor (Diff k) where
 -- change, while the rightmost element in the history is the /latest/ change.
 newtype DeltaHistory v = DeltaHistory { getDeltaHistory :: NESeq (Delta v) }
   deriving stock (Generic, Show, Eq, Functor)
-  deriving newtype (NoThunks)
+  deriving newtype (NoThunks, Semigroup)
 
 -- | A change to a value in a key-value store.
 data Delta v =
@@ -231,23 +239,6 @@ numDeletes (Diff m) = getSum $ foldMap' f m
       Just (Insert _) -> 0
       Just  Delete    -> 1
       Nothing         -> 0
-
-{------------------------------------------------------------------------------
-  Instances
-------------------------------------------------------------------------------}
-
-deriving newtype instance Ord k => Semigroup (Diff k v)
-
-deriving newtype instance Ord k => Monoid (Diff k v)
-
-deriving newtype instance (Ord k, Eq v) => LeftReductive (Diff k v)
-
-deriving newtype instance (Ord k, Eq v) => RightReductive (Diff k v)
-
-instance (Ord k, Eq v) => LeftCancellative (Diff k v)
-instance (Ord k, Eq v) => RightCancellative (Diff k v)
-
-deriving newtype instance Semigroup (DeltaHistory v)
 
 {------------------------------------------------------------------------------
   Applying diffs
