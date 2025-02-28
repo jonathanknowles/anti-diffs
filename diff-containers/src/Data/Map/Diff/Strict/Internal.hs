@@ -60,10 +60,13 @@ import           Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import           Data.Monoid (Sum (..))
+import           Data.MonoidMap (MonoidMap)
+import qualified Data.MonoidMap as MonoidMap
 import           Data.Semigroup.Cancellative (LeftCancellative,
                      LeftReductive (..), RightCancellative, RightReductive (..))
+import           Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
-import           Data.Sequence.NonEmpty (NESeq (..), nonEmptySeq)
+import           Data.Sequence.NonEmpty (NESeq (..))
 import qualified Data.Sequence.NonEmpty as NESeq
 import           Data.Sequence.NonEmpty.Extra ()
 import           Data.Set (Set)
@@ -77,14 +80,14 @@ import           Prelude hiding (last, length, null, splitAt)
 ------------------------------------------------------------------------------}
 
 -- | A diff for key-value stores.
-newtype Diff k v = Diff (Map k (NESeq (Delta v)))
+newtype Diff k v = Diff (MonoidMap k (Seq (Delta v)))
   deriving stock (Generic, Show, Eq)
   deriving anyclass (NoThunks)
 
 -- | Custom 'Functor' instance, since @'Functor' ('Map' k)@ is actually the
 -- 'Functor' instance for a lazy Map.
 instance Functor (Diff k) where
-  fmap f (Diff m) = Diff $ Map.map (fmap (fmap f)) m
+  fmap f (Diff m) = Diff $ MonoidMap.map (fmap (fmap f)) m
 
 -- | A non-empty history of changes to a value in a key-value store.
 --
@@ -107,7 +110,7 @@ data Delta v =
 ------------------------------------------------------------------------------}
 
 keysSet :: Diff k v -> Set k
-keysSet (Diff m) = Map.keysSet m
+keysSet (Diff m) = MonoidMap.nonNullKeys m
 
 {------------------------------------------------------------------------------
   Construction
@@ -116,14 +119,19 @@ keysSet (Diff m) = Map.keysSet m
 -- | Compute the difference between @'Map'@s.
 diff :: (Ord k, Eq v) => Map k v -> Map k v -> Diff k v
 diff m1 m2 = Diff $
+    MonoidMap.fromMap $
     Merge.merge
-      (Merge.mapMissing $ \_k _v -> getDeltaHistory singletonDelete)
-      (Merge.mapMissing $ \_k v -> getDeltaHistory $ singletonInsert v)
+      (Merge.mapMissing $ \_k _v ->
+          NESeq.toSeq $ getDeltaHistory singletonDelete
+      )
+      (Merge.mapMissing $ \_k v ->
+          NESeq.toSeq $ getDeltaHistory $ singletonInsert v
+      )
       (Merge.zipWithMaybeMatched $ \ _k v1 v2 ->
         if v1 == v2 then
           Nothing
         else
-          Just $
+          Just . NESeq.toSeq $
             getDeltaHistory singletonDelete <>
             getDeltaHistory (singletonInsert v2)
       )
@@ -131,22 +139,32 @@ diff m1 m2 = Diff $
       m2
 
 empty :: Diff k v
-empty = Diff Map.empty
+empty = Diff MonoidMap.empty
 
 -- | @'fromMap' m@ creates a @'Diff'@ from the inserts and deletes in @m@.
 fromMap :: Map k (Delta v) -> Diff k v
-fromMap = Diff . Map.map (getDeltaHistory . singleton)
+fromMap =
+  Diff
+    . MonoidMap.fromMap
+    . Map.map (NESeq.toSeq . getDeltaHistory . singleton)
 
 -- | @'fromMapInserts' m@ creates a @'Diff'@ that inserts all values in @m@.
 fromMapInserts :: Map k v -> Diff k v
-fromMapInserts = Diff . Map.map (getDeltaHistory . singletonInsert)
+fromMapInserts =
+  Diff
+    . MonoidMap.fromMap
+    . Map.map (NESeq.toSeq . getDeltaHistory . singletonInsert)
 
 -- | @'fromMapDeletes' m@ creates a @'Diff'@ that deletes all values in @m@.
 fromMapDeletes :: Map k v -> Diff k v
-fromMapDeletes = Diff . Map.map (const (getDeltaHistory singletonDelete))
+fromMapDeletes =
+  Diff
+    . MonoidMap.fromMap
+    . Map.map (const (NESeq.toSeq $ getDeltaHistory singletonDelete))
 
 fromListDeltaHistories :: Ord k => [(k, DeltaHistory v)] -> Diff k v
-fromListDeltaHistories = Diff . Map.fromList . fmap (fmap getDeltaHistory)
+fromListDeltaHistories =
+  Diff . MonoidMap.fromList . fmap (fmap (NESeq.toSeq . getDeltaHistory))
 
 -- | @'fromList' xs@ creates a @'Diff'@ from the inserts and deletes in @xs@.
 fromList :: Ord k => [(k, Delta v)] -> Diff k v
@@ -176,15 +194,19 @@ singletonDelete = singleton Delete
 last :: DeltaHistory v -> Delta v
 last (DeltaHistory (_ NESeq.:||> e)) = e
 
+lastMaybe :: Seq (Delta v) -> Maybe (Delta v)
+lastMaybe (_ Seq.:|> e) = Just e
+lastMaybe _ = Nothing
+
 {------------------------------------------------------------------------------
   Query
 ------------------------------------------------------------------------------}
 
 null :: Diff k v -> Bool
-null (Diff m) = Map.null m
+null (Diff m) = MonoidMap.null m
 
 size :: Diff k v -> Int
-size (Diff m) = Map.size m
+size (Diff m) = MonoidMap.nonNullCount m
 
 -- | @'numInserts' d@ returns the number of inserts in the diff @d@.
 --
@@ -193,9 +215,10 @@ size (Diff m) = Map.size m
 numInserts :: Diff k v -> Int
 numInserts (Diff m) = getSum $ foldMap' f m
   where
-    f h = case last (DeltaHistory h) of
-      Insert _ -> 1
-      Delete   -> 0
+    f h = case lastMaybe h of
+      Just (Insert _) -> 1
+      Just  Delete    -> 0
+      Nothing         -> 0
 
 -- | @'numDeletes' d@ returns the number of deletes in the diff @d@.
 --
@@ -204,59 +227,22 @@ numInserts (Diff m) = getSum $ foldMap' f m
 numDeletes :: Diff k v -> Int
 numDeletes (Diff m) = getSum $ foldMap' f m
   where
-    f h = case last (DeltaHistory h) of
-      Insert _ -> 0
-      Delete   -> 1
+    f h = case lastMaybe h of
+      Just (Insert _) -> 0
+      Just  Delete    -> 1
+      Nothing         -> 0
 
 {------------------------------------------------------------------------------
   Instances
 ------------------------------------------------------------------------------}
 
-instance Ord k => Semigroup (Diff k v) where
-  (<>) :: Diff k v -> Diff k v -> Diff k v
-  (Diff m1) <> (Diff m2) = Diff $ Map.unionWith (<>) m1 m2
+deriving newtype instance Ord k => Semigroup (Diff k v)
 
-instance Ord k => Monoid (Diff k v) where
-  mempty :: Diff k v
-  mempty = Diff mempty
+deriving newtype instance Ord k => Monoid (Diff k v)
 
-instance (Ord k, Eq v) => LeftReductive (Diff k v) where
-  stripPrefix :: Diff k v -> Diff k v -> Maybe (Diff k v)
-  stripPrefix (Diff m1) (Diff m2) = Diff <$>
-      Merge.mergeA
-        (Merge.traverseMissing $ \_ _ -> Nothing)
-        Merge.preserveMissing
-        (Merge.zipWithMaybeAMatched f)
-        m1
-        m2
-    where
-      f :: k
-        -> NESeq (Delta v)
-        -> NESeq (Delta v)
-        -> Maybe (Maybe (NESeq (Delta v)))
-      f _ h1 h2 = NESeq.nonEmptySeq <$>
-          stripPrefix
-            (NESeq.toSeq h1)
-            (NESeq.toSeq h2)
+deriving newtype instance (Ord k, Eq v) => LeftReductive (Diff k v)
 
-instance (Ord k, Eq v) => RightReductive (Diff k v) where
-  stripSuffix :: Diff k v -> Diff k v -> Maybe (Diff k v)
-  stripSuffix (Diff m1) (Diff m2) = Diff <$>
-      Merge.mergeA
-        (Merge.traverseMissing $ \_ _ -> Nothing)
-        Merge.preserveMissing
-        (Merge.zipWithMaybeAMatched f)
-        m1
-        m2
-    where
-      f :: k
-        -> NESeq (Delta v)
-        -> NESeq (Delta v)
-        -> Maybe (Maybe (NESeq (Delta v)))
-      f _ h1 h2 = NESeq.nonEmptySeq <$>
-          stripSuffix
-            (NESeq.toSeq h1)
-            (NESeq.toSeq h2)
+deriving newtype instance (Ord k, Eq v) => RightReductive (Diff k v)
 
 instance (Ord k, Eq v) => LeftCancellative (Diff k v)
 instance (Ord k, Eq v) => RightCancellative (Diff k v)
@@ -279,7 +265,7 @@ applyDiff m (Diff diffs) =
       (Merge.mapMaybeMissing newKeys)
       (Merge.zipWithMaybeMatched oldKeys)
       m
-      diffs
+      (Map.mapMaybe NESeq.nonEmptySeq (MonoidMap.toMap diffs))
   where
     newKeys :: k -> NESeq (Delta v) -> Maybe v
     newKeys _k h = case last (DeltaHistory h) of
@@ -301,7 +287,9 @@ applyDiffForKeys ::
 applyDiffForKeys m ks (Diff diffs) =
   applyDiff
     m
-    (Diff $ diffs `Map.restrictKeys` (Map.keysSet m `Set.union` ks))
+    $ Diff
+    $ MonoidMap.fromMap
+    $ MonoidMap.toMap diffs `Map.restrictKeys` (Map.keysSet m `Set.union` ks)
 
 {------------------------------------------------------------------------------
   Folds and traversals
@@ -310,7 +298,7 @@ applyDiffForKeys m ks (Diff diffs) =
 -- | @'foldMap'@ over the last delta in each delta history.
 foldMapDelta :: (Monoid m) => (Delta v -> m) -> Diff k v -> m
 foldMapDelta f (Diff m) =
-  foldMap (f . NESeq.last) m
+  foldMap (foldMap f . lastMaybe) m
 
 -- | Traversal with keys over the last delta in each delta history.
 traverseDeltaWithKey_ ::
@@ -318,26 +306,20 @@ traverseDeltaWithKey_ ::
   => (k -> Delta v -> t a)
   -> Diff k v
   -> t ()
-traverseDeltaWithKey_ f (Diff m) = void $ Map.traverseWithKey g m
+traverseDeltaWithKey_ f (Diff m) =
+    void $ Map.traverseWithKey g $ MonoidMap.toMap m
   where
-    g k dh = f k (last (DeltaHistory dh))
+    g k = traverse (f k) . lastMaybe
 
 {-------------------------------------------------------------------------------
   Filter
 -------------------------------------------------------------------------------}
 
 filterOnlyKey :: (k -> Bool) -> Diff k v -> Diff k v
-filterOnlyKey f (Diff m) = Diff $ Map.filterWithKey (const . f) m
+filterOnlyKey f (Diff m) = Diff $ MonoidMap.filterWithKey (const . f) m
 
-mapMaybeSeq :: (v -> Maybe v') -> DeltaHistory v -> Maybe (DeltaHistory v')
-mapMaybeSeq f =
-    fmap DeltaHistory
-  . nonEmptySeq
-  . Seq.fromList
-  . Maybe.mapMaybe (traverse f)
-  . toList
-  . getDeltaHistory
+mapMaybeSeq :: (v -> Maybe v') -> Seq (Delta v) -> Seq (Delta v')
+mapMaybeSeq f = Seq.fromList . Maybe.mapMaybe (traverse f) . toList
 
 mapMaybeDiff :: (v -> Maybe v') -> Diff k v -> Diff k v'
-mapMaybeDiff f (Diff d) =
-  Diff $ Map.mapMaybe (fmap getDeltaHistory . mapMaybeSeq f . DeltaHistory) d
+mapMaybeDiff f (Diff d) = Diff $ MonoidMap.map (mapMaybeSeq f) d
