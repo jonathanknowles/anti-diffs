@@ -161,15 +161,16 @@ fromListDeltaHistories =
 
 -- | @'fromList' xs@ creates a @'Diff'@ from the inserts and deletes in @xs@.
 fromList :: Ord k => [(k, Delta v)] -> Diff k v
-fromList = fromListDeltaHistories . fmap (second singleton)
+fromList = Diff . MonoidMap.fromList . fmap (second Seq.singleton)
 
 -- | @'fromListInserts' xs@ creates a @'Diff'@ that inserts all values in @xs@.
 fromListInserts :: Ord k => [(k, v)] -> Diff k v
-fromListInserts = fromListDeltaHistories . fmap (second singletonInsert)
+fromListInserts =
+  Diff . MonoidMap.fromList . fmap (fmap (Seq.singleton . Insert))
 
 -- | @'fromListDeletes' xs@ creates a @'Diff'@ that deletes all values in @xs@.
 fromListDeletes :: Ord k => [k] -> Diff k v
-fromListDeletes = fromListDeltaHistories . fmap (,singletonDelete)
+fromListDeletes = Diff . MonoidMap.fromList . fmap (, Seq.singleton Delete)
 
 singleton :: Delta v -> DeltaHistory v
 singleton = DeltaHistory . NESeq.singleton
