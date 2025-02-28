@@ -151,24 +151,15 @@ empty = Diff MonoidMap.empty
 
 -- | @'fromMap' m@ creates a @'Diff'@ from the inserts and deletes in @m@.
 fromMap :: Map k (Delta v) -> Diff k v
-fromMap =
-  Diff
-    . MonoidMap.fromMap
-    . Map.map (NESeq.toSeq . getDeltaHistory . singleton)
+fromMap = Diff . MonoidMap.fromMapWith Seq.singleton
 
 -- | @'fromMapInserts' m@ creates a @'Diff'@ that inserts all values in @m@.
 fromMapInserts :: Map k v -> Diff k v
-fromMapInserts =
-  Diff
-    . MonoidMap.fromMap
-    . Map.map (NESeq.toSeq . getDeltaHistory . singletonInsert)
+fromMapInserts = Diff . MonoidMap.fromMapWith (Seq.singleton . Insert)
 
 -- | @'fromMapDeletes' m@ creates a @'Diff'@ that deletes all values in @m@.
 fromMapDeletes :: Map k v -> Diff k v
-fromMapDeletes =
-  Diff
-    . MonoidMap.fromMap
-    . Map.map (const (NESeq.toSeq $ getDeltaHistory singletonDelete))
+fromMapDeletes = Diff . MonoidMap.fromMapWith (const $ Seq.singleton Delete)
 
 fromListDeltaHistories :: Ord k => [(k, DeltaHistory v)] -> Diff k v
 fromListDeltaHistories =
