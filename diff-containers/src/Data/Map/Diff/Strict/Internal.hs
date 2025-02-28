@@ -256,17 +256,19 @@ applyDiff m (Diff diffs) =
       (Merge.mapMaybeMissing newKeys)
       (Merge.zipWithMaybeMatched oldKeys)
       m
-      (Map.mapMaybe NESeq.nonEmptySeq (MonoidMap.toMap diffs))
+      (MonoidMap.toMap diffs)
   where
-    newKeys :: k -> NESeq (Delta v) -> Maybe v
-    newKeys _k h = case last (DeltaHistory h) of
-      Insert x -> Just x
-      Delete   -> Nothing
+    newKeys :: k -> Seq (Delta v) -> Maybe v
+    newKeys _k h = case lastMaybe h of
+      Just (Insert x) -> Just x
+      Just  Delete    -> Nothing
+      Nothing         -> Nothing
 
-    oldKeys :: k -> v -> NESeq (Delta v) -> Maybe v
-    oldKeys _k _v1 h = case last (DeltaHistory h) of
-      Insert x -> Just x
-      Delete   -> Nothing
+    oldKeys :: k -> v -> Seq (Delta v) -> Maybe v
+    oldKeys _k _v1 h = case lastMaybe h of
+      Just (Insert x) -> Just x
+      Just  Delete    -> Nothing
+      Nothing         -> Nothing
 
 -- | Applies a diff to a @'Map'@ for a specific set of keys.
 applyDiffForKeys ::
