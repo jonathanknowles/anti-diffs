@@ -239,22 +239,16 @@ applyDiff ::
 applyDiff m (Diff diffs) =
     Merge.merge
       Merge.preserveMissing
-      (Merge.mapMaybeMissing newKeys)
-      (Merge.zipWithMaybeMatched oldKeys)
+      (Merge.mapMaybeMissing (\_k s -> lastKeyMaybe s)
+      (Merge.zipWithMaybeMatched (\_k _v s -> lastKeyMaybe s)
       m
       (MonoidMap.toMap diffs)
   where
-    newKeys :: k -> Seq (Delta v) -> Maybe v
-    newKeys _k h = case lastMaybe h of
-      Just (Insert x) -> Just x
-      Just  Delete    -> Nothing
-      Nothing         -> Nothing
-
-    oldKeys :: k -> v -> Seq (Delta v) -> Maybe v
-    oldKeys _k _v1 h = case lastMaybe h of
-      Just (Insert x) -> Just x
-      Just  Delete    -> Nothing
-      Nothing         -> Nothing
+    lastKeyMaybe :: Seq (Delta v) -> Maybe v
+    lastKeyMaybe s = extract =<< lastMaybe s
+      where
+        extract (Insert x) = Just x
+        extract Delete     = Nothing
 
 -- | Applies a diff to a @'Map'@ for a specific set of keys.
 applyDiffForKeys ::
