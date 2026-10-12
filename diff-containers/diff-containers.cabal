@@ -56,6 +56,7 @@ library
   build-depends:
     base >=4.9 && <4.22,
     containers,
+    monoidmap >= 0.0.6.0 && <0.1,
     monoid-subclasses,
     nonempty-containers,
     nothunks,
@@ -75,6 +76,7 @@ test-suite test
     base >=4.9 && <4.22,
     containers,
     diff-containers,
+    monoidmap-quickcheck >=0.0.0.6 && <0.1,
     nonempty-containers,
     quickcheck-classes,
     quickcheck-monoid-subclasses,
