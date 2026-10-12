@@ -16,6 +16,7 @@ import Data.Map.Diff.Strict.Internal
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
+import Data.MonoidMap.QuickCheck.Instances.Arbitrary ()
 import Data.Sequence.NonEmpty (NESeq (..))
 import qualified Data.Sequence.NonEmpty as NESeq
 import qualified Data.Set as Set
