@@ -162,9 +162,12 @@ deriving newtype instance
   Arbitrary (Diff k v)
 
 instance Arbitrary v => Arbitrary (DeltaHistory v) where
-  arbitrary = DeltaHistory <$> ((:<||) <$> arbitrary <*> arbitrary)
-  shrink (DeltaHistory h) =
-    fmap DeltaHistory $ mapMaybe NESeq.nonEmptySeq $ shrink (NESeq.toSeq h)
+  arbitrary = DeltaHistory <$> arbitrary
+  shrink (DeltaHistory h) = fmap DeltaHistory (shrink h)
+
+instance Arbitrary v => Arbitrary (NESeq v) where
+  arbitrary = ((:<||) <$> arbitrary <*> arbitrary)
+  shrink h = mapMaybe NESeq.nonEmptySeq $ shrink (NESeq.toSeq h)
 
 instance Arbitrary v => Arbitrary (Delta v) where
   arbitrary =
