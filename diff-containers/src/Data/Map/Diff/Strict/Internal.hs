@@ -66,6 +66,7 @@ module Data.Map.Diff.Strict.Internal
 
 import Control.Monad (void)
 import Data.Bifunctor (Bifunctor (second))
+import Data.Coerce (coerce)
 import Data.Foldable (foldMap', toList)
 import qualified Data.Map.Merge.Strict as Merge
 import Data.Map.Strict (Map)
@@ -93,14 +94,14 @@ import Prelude hiding (last, length, null, splitAt)
 ------------------------------------------------------------------------------}
 
 -- | A diff for key-value stores.
-newtype Diff k v = Diff (Map k (DeltaHistory v))
+newtype Diff k v = Diff (Map k (NESeq (Delta v)))
   deriving stock (Generic, Show, Eq)
   deriving anyclass NoThunks
 
 -- | Custom 'Functor' instance, since @'Functor' ('Map' k)@ is actually the
 -- 'Functor' instance for a lazy Map.
 instance Functor (Diff k) where
-  fmap f (Diff m) = Diff $ Map.map (fmap f) m
+  fmap f (Diff m) = Diff $ Map.map (fmap (fmap f)) m
 
 -- | A non-empty history of changes to a value in a key-value store.
 --
@@ -133,7 +134,7 @@ keysSet (Diff m) = Map.keysSet m
 diff :: (Ord k, Eq v) => Map k v -> Map k v -> Diff k v
 diff m1 m2 =
   Diff $
-    Merge.merge
+    (coerce Merge.merge)
       (Merge.mapMissing $ \_k _v -> singletonDelete)
       (Merge.mapMissing $ \_k v -> singletonInsert v)
       ( Merge.zipWithMaybeMatched $ \_k v1 v2 ->
@@ -151,18 +152,18 @@ empty = Diff Map.empty
 
 -- | @'fromMap' m@ creates a @'Diff'@ from the inserts and deletes in @m@.
 fromMap :: Map k (Delta v) -> Diff k v
-fromMap = Diff . Map.map singleton
+fromMap = Diff . Map.map (coerce singleton)
 
 -- | @'fromMapInserts' m@ creates a @'Diff'@ that inserts all values in @m@.
 fromMapInserts :: Map k v -> Diff k v
-fromMapInserts = Diff . Map.map singletonInsert
+fromMapInserts = Diff . Map.map (coerce singletonInsert)
 
 -- | @'fromMapDeletes' m@ creates a @'Diff'@ that deletes all values in @m@.
 fromMapDeletes :: Map k v -> Diff k v
-fromMapDeletes = Diff . Map.map (const singletonDelete)
+fromMapDeletes = Diff . Map.map (const (coerce singletonDelete))
 
 fromListDeltaHistories :: Ord k => [(k, DeltaHistory v)] -> Diff k v
-fromListDeltaHistories = Diff . Map.fromList
+fromListDeltaHistories = Diff . coerce Map.fromList
 
 -- | @'fromList' xs@ creates a @'Diff'@ from the inserts and deletes in @xs@.
 fromList :: Ord k => [(k, Delta v)] -> Diff k v
@@ -209,7 +210,7 @@ size (Diff m) = Map.size m
 numInserts :: Diff k v -> Int
 numInserts (Diff m) = getSum $ foldMap' f m
  where
-  f h = case last h of
+  f h = case last (coerce h) of
     Insert _ -> 1
     Delete -> 0
 
@@ -220,7 +221,7 @@ numInserts (Diff m) = getSum $ foldMap' f m
 numDeletes :: Diff k v -> Int
 numDeletes (Diff m) = getSum $ foldMap' f m
  where
-  f h = case last h of
+  f h = case last (coerce h) of
     Insert _ -> 0
     Delete -> 1
 
@@ -243,7 +244,7 @@ instance (Ord k, Eq v) => LeftReductive (Diff k v) where
       <$> Merge.mergeA
         (Merge.traverseMissing $ \_ _ -> Nothing)
         Merge.preserveMissing
-        (Merge.zipWithMaybeAMatched f)
+        (Merge.zipWithMaybeAMatched (coerce f))
         m1
         m2
    where
@@ -265,7 +266,7 @@ instance (Ord k, Eq v) => RightReductive (Diff k v) where
       <$> Merge.mergeA
         (Merge.traverseMissing $ \_ _ -> Nothing)
         Merge.preserveMissing
-        (Merge.zipWithMaybeAMatched f)
+        (Merge.zipWithMaybeAMatched (coerce f))
         m1
         m2
    where
@@ -296,7 +297,7 @@ applyDiff ::
   Diff k v ->
   Map k v
 applyDiff m (Diff diffs) =
-  Merge.merge
+  (coerce Merge.merge)
     Merge.preserveMissing
     (Merge.mapMaybeMissing newKeys)
     (Merge.zipWithMaybeMatched oldKeys)
@@ -332,7 +333,7 @@ applyDiffForKeys m ks (Diff diffs) =
 -- | @'foldMap'@ over the last delta in each delta history.
 foldMapDelta :: Monoid m => (Delta v -> m) -> Diff k v -> m
 foldMapDelta f (Diff m) =
-  foldMap (f . NESeq.last . getDeltaHistory) m
+  foldMap (f . NESeq.last) m
 
 -- | Traversal with keys over the last delta in each delta history.
 traverseDeltaWithKey_ ::
@@ -342,7 +343,7 @@ traverseDeltaWithKey_ ::
   t ()
 traverseDeltaWithKey_ f (Diff m) = void $ Map.traverseWithKey g m
  where
-  g k dh = f k (last dh)
+  g k dh = f k (last (coerce dh))
 
 {-------------------------------------------------------------------------------
   Filter
@@ -361,4 +362,4 @@ mapMaybeSeq f =
     . getDeltaHistory
 
 mapMaybeDiff :: (v -> Maybe v') -> Diff k v -> Diff k v'
-mapMaybeDiff f (Diff d) = Diff $ Map.mapMaybe (mapMaybeSeq f) d
+mapMaybeDiff f (Diff d) = Diff $ Map.mapMaybe (coerce mapMaybeSeq f) d
